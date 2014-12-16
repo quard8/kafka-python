@@ -10,6 +10,8 @@ except ImportError:
 from collections import defaultdict
 from multiprocessing import Queue, Process
 
+import gevent
+
 import six
 
 from kafka.common import (
@@ -49,7 +51,7 @@ def _send_upstream(queue, client, codec, batch_time, batch_size,
         # timeout is reached
         while count > 0 and timeout >= 0:
             try:
-                topic_partition, msg, key = queue.get(timeout=timeout)
+                topic_partition, msg, key = queue.get_nowait()
 
             except Empty:
                 break
@@ -79,6 +81,8 @@ def _send_upstream(queue, client, codec, batch_time, batch_size,
                                         timeout=ack_timeout)
         except Exception:
             log.exception("Unable to send message")
+
+        gevent.sleep(0.1)
 
 
 class Producer(object):
@@ -136,22 +140,25 @@ class Producer(object):
         self.codec = codec
 
         if self.async:
-            log.warning("async producer does not guarantee message delivery!")
-            log.warning("Current implementation does not retry Failed messages")
-            log.warning("Use at your own risk! (or help improve with a PR!)")
-            self.queue = Queue()  # Messages are sent through this queue
-            self.proc = Process(target=_send_upstream,
-                                args=(self.queue,
-                                      self.client.copy(),
-                                      self.codec,
-                                      batch_send_every_t,
-                                      batch_send_every_n,
-                                      self.req_acks,
-                                      self.ack_timeout))
+            self._setup_async(batch_send_every_t, batch_send_every_n)
 
-            # Process will die if main thread exits
-            self.proc.daemon = True
-            self.proc.start()
+    def _setup_async(self, batch_send_every_t, batch_send_every_n):
+        log.warning("async producer does not guarantee message delivery!")
+        log.warning("Current implementation does not retry Failed messages")
+        log.warning("Use at your own risk! (or help improve with a PR!)")
+        self.queue = Queue()  # Messages are sent through this queue
+        self.proc = Process(target=_send_upstream,
+                            args=(self.queue,
+                                  self.client.copy(),
+                                  self.codec,
+                                  batch_send_every_t,
+                                  batch_send_every_n,
+                                  self.req_acks,
+                                  self.ack_timeout))
+
+        # Process will die if main thread exits
+        self.proc.daemon = True
+        self.proc.start()
 
     def send_messages(self, topic, partition, *msg):
         """
@@ -188,7 +195,7 @@ class Producer(object):
 
         if self.async:
             for m in msg:
-                self.queue.put((TopicAndPartition(topic, partition), m, key))
+                self.queue.put_nowait((TopicAndPartition(topic, partition), m, key))
             resp = []
         else:
             messages = create_message_set(msg, self.codec, key)

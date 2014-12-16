@@ -21,6 +21,9 @@ def collect_hosts(hosts, randomize=True):
     randomize the returned list.
     """
 
+    if isinstance(hosts, list):
+        return hosts
+
     if isinstance(hosts, six.string_types):
         hosts = hosts.strip().split(',')
 
@@ -38,7 +41,21 @@ def collect_hosts(hosts, randomize=True):
     return result
 
 
-class KafkaConnection(local):
+class ConnectionBaseClass(type):
+    """
+    Metaclass to make KafkaConnection work with gevent.
+    """
+    def __new__(mcs, name, bases, attrs):
+        if local.__module__ == 'gevent.local':
+            # change base to object to avoid using one connection per greenlet
+            bases = (object,)
+        else:
+            bases = (local,)
+
+        return type(name, bases, attrs)
+
+
+class KafkaConnection(six.with_metaclass(ConnectionBaseClass)):
     """
     A socket connection to a single Kafka broker
 

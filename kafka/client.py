@@ -49,6 +49,7 @@ class KafkaClient(object):
 
     def _get_conn(self, host, port):
         "Get or create a connection to a broker using host and port"
+
         host_key = (host, port)
         if host_key not in self.conns:
             self.conns[host_key] = KafkaConnection(
